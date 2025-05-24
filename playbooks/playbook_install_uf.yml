@@ -1,0 +1,97 @@
+- name: Installiere und konfiguriere Splunk Universal Forwarder auf ZielVM2
+  hosts: splunk_forwarder
+  become: yes
+  gather_facts: false
+  vars_files:
+    - ../vault/secrets.yml
+    - ../group_vars/all.yml 
+  pre_tasks:
+    - name: Debug Prüfe ob Variable geladen wurde
+      debug:
+        var: splunkforwarder_tgz_url
+
+    - name: Lade Fakten (nach sudo)
+      setup:  
+
+  tasks:
+    - name: Lade Universal Forwarder herunter
+      get_url:
+        url: "{{ splunkforwarder_tgz_url }}"
+        dest: "/tmp/uf.tgz"
+
+    
+    - name: Stoppe Splunk Forwarder, falls laufend
+      command: /opt/splunkforwarder/bin/splunk stop
+      ignore_errors: true
+
+    - name: Entferne alte Splunkforwarder-Installation (rekursiv)
+      file:
+       path: "{{ uf_install_dir }}/splunkforwarder"
+       state: absent
+       force: true
+
+
+
+    - name: Entpacke Universal Forwarder
+      unarchive:
+        src: "/tmp/uf.tgz"
+        dest: "{{ uf_install_dir }}"
+        remote_src: yes
+
+    - name: Setze Besitzer auf root
+      file:
+        path: "{{ uf_install_dir }}/splunkforwarder"
+        owner: root
+        group: root
+        recurse: yes
+
+
+    - name: Erstelle Admin-User Datei (für Initial Setup)
+      copy:
+        dest: "/opt/splunkforwarder/etc/system/local/user-seed.conf"
+        content: |
+          [user_info]
+          USERNAME = {{ splunk_admin_user }}
+          PASSWORD = {{ splunk_admin_password }}
+
+
+
+    - name: Akzeptiere Lizenz & Starte Forwarder
+      command: "/opt/splunkforwarder/bin/splunk start --accept-license --answer-yes --no-prompt"
+      args:
+        creates: "/opt/splunkforwarder/etc/.ui_login"
+
+    - name: Deaktiviere Boot-Start, falls vorhanden
+      command: /opt/splunkforwarder/bin/splunk disable boot-start
+      ignore_errors: true
+
+
+    - name: Stoppe Splunk Forwarder erneut vor boot-start
+      command: /opt/splunkforwarder/bin/splunk stop
+      ignore_errors: true
+
+    - name: Aktiviere Autostart
+      command: "/opt/splunkforwarder/bin/splunk enable boot-start -user root -systemd-managed 1"
+
+
+    - name: Starte SplunkForwarder Service
+      systemd:
+        name: SplunkForwarder
+        state: started
+        enabled: yes
+
+    - name: Warte bis Indexer erreichbar ist
+      wait_for:
+        host: "{{ indexer_host }}"
+        port: "{{ indexer_port }}"
+        timeout: 60
+
+    - name: Verbinde Forwarder mit Indexer
+      command: "/opt/splunkforwarder/bin/splunk add forward-server {{ indexer_host }}:{{ indexer_port }} -auth {{ splunk_admin_user }}:{{ splunk_admin_password }}"
+      register: forward_result
+      failed_when: "'already exists' not in forward_result.stderr and forward_result.rc != 0"
+
+    - name: Konfiguriere Monitoring für Logfile
+      command: "/opt/splunkforwarder/bin/splunk add monitor {{ monitor_path }} -index {{ monitor_index }} -sourcetype syslog -auth {{ splunk_admin_user }}:{{ splunk_admin_password }}"
+      register: monitor_result
+      failed_when: "'already exists' not in monitor_result.stderr and monitor_result.rc != 0"

@@ -1,0 +1,107 @@
+- name: Installiere Splunk Enterprise auf ZielVM1
+  hosts: splunk_server
+  become: yes
+  gather_facts: false
+  vars_files:
+    - ../vault/secrets.yml
+    - ../group_vars/all.yml
+  pre_tasks:
+    - name: Debug prüfe ob Variable geladen wurde
+      debug:
+        var: splunk_tgz_url
+
+    - name: Lade Fakten (nach sudo)
+      setup:
+
+  tasks:
+    - name: Lade Splunk herunter
+      get_url:
+        url: "{{ splunk_tgz_url }}"
+        dest: "/tmp/splunk.tgz"
+
+    - name: Stoppe Splunk falls laufend
+      command: /opt/splunk/bin/splunk stop
+      ignore_errors: true
+
+    - name: Entferne alte Splunk-Installation (rekursiv, auch wenn nicht leer)
+      file:
+       path: "{{ splunk_install_dir }}/splunk"
+       state: absent
+       force: true
+
+
+    - name: Entpacke Splunk
+      unarchive:
+        src: "/tmp/splunk.tgz"
+        dest: "{{ splunk_install_dir }}"
+        remote_src: yes
+
+    - name: Setze Besitzer auf root
+      file:
+        path: "{{ splunk_install_dir }}/splunk"
+        owner: root
+        group: root
+        recurse: yes
+
+    - name: Erstelle Admin-User Datei (für Initial Setup)
+      copy:
+        dest: "/opt/splunk/etc/system/local/user-seed.conf"
+        content: |
+          [user_info]
+          USERNAME = {{ splunk_admin_user }}
+          PASSWORD = {{ splunk_admin_password }}
+
+    - name: Starte Splunk erstmalig (Lizenz akzeptieren)
+      command: "/opt/splunk/bin/splunk start --accept-license --answer-yes --no-prompt"
+      args:
+        creates: "/opt/splunk/etc/.ui_login"
+
+    - name: Prüfe, ob splunk_user gesetzt ist
+      debug:
+       msg: "splunk_user = {{ splunk_user | default('NICHT GESETZT') }}"
+
+    - name: Deaktiviere Boot-Start, falls vorhanden
+      command: /opt/splunk/bin/splunk disable boot-start
+      ignore_errors: true
+
+    - name: Stoppe Splunk erneut, damit enable boot-start funktioniert
+      command: /opt/splunk/bin/splunk stop
+      ignore_errors: true
+
+    - name: Enable Boot Start
+      command: >
+       /opt/splunk/bin/splunk enable boot-start -user {{ splunk_user | default('root') }} -systemd-managed 1
+
+
+
+    - name: Starte Splunkd Service
+      systemd:
+        name: Splunkd
+        state: started
+        enabled: yes
+
+    - name: Öffne Port 8000 für Webinterface
+      firewalld:
+        port: 8000/tcp
+        permanent: yes
+        state: enabled
+        immediate: yes
+
+    - name: Öffne Port 9997 für Universal Forwarder
+      firewalld:
+        port: 9997/tcp
+        permanent: yes
+        state: enabled
+        immediate: yes
+
+    - name: Enable Listening on Port 9997
+      command: "/opt/splunk/bin/splunk enable listen 9997 -auth {{ splunk_admin_user }}:{{ splunk_admin_password }}"
+      register: listen_result
+      failed_when: "'already exists' not in listen_result.stderr and listen_result.rc != 0"
+
+    - name: Erstelle Index 'forwarderlogs'
+      command: >
+       /opt/splunk/bin/splunk add index forwarderlogs -auth {{ splunk_admin_user }}:{{ splunk_admin_password }}
+      register: create_index_result
+      failed_when: "'already exists' not in create_index_result.stderr and create_index_result.rc != 0"
+

@@ -1,0 +1,16 @@
+ansible_user: admin
+ansible_become: true
+ansible_become_method: sudo
+ansible_become_password: "{{ vault_become_password }}"
+
+splunk_admin_user: admin
+splunk_admin_password: "{{ vault_splunk_password }}"
+splunk_install_dir: "/opt"
+splunk_user: "root"
+uf_install_dir: "/opt"
+splunk_tgz_url: "https://download.splunk.com/products/splunk/releases/9.2.1/linux/splunk-9.2.1-Linux-x86_64.tgz"
+splunkforwarder_tgz_url: "https://download.splunk.com/products/universalforwarder/releases/9.2.1/linux/splunkforwarder-9.2.1-Linux-x86_64.tgz"
+indexer_host: "192.168.56.11"
+indexer_port: 9997
+monitor_path: "/var/log/messages"
+monitor_index: "forwarderlogs"

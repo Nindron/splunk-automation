@@ -1,0 +1,6 @@
+---
+- name: Verbindungstest mit allen Ziel-VMs
+  hosts: zielvms
+  tasks:
+    - name: Ping-Test
+      ansible.builtin.ping:
