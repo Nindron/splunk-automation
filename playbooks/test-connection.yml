@@ -1,6 +1,14 @@
 ---
 - name: Verbindungstest mit allen Ziel-VMs
-  hosts: zielvms
+  hosts: all
+  gather_facts: no
+
   tasks:
-    - name: Ping-Test
-      ansible.builtin.ping:
+    - name: Hostname anzeigen
+      command: hostname
+      register: result
+
+    - name: Ausgabe des Hostnamens anzeigen
+      debug:
+        msg: "Hostname auf {{ inventory_hostname }}: {{ result.stdout }}"
+
